@@ -21,6 +21,8 @@ pub async fn call_openai_api(
         "max_tokens": 500
     });
 
+    log::debug!("sending to openai: {}", serde_json::to_string(&req)?);
+
     let mut resp: Value = Request::post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
         .header(
