@@ -12,6 +12,7 @@ argh = "0.1.10"
 async-broadcast = "0.5.1"
 async-compat = "0.2.1"
 base64 = "0.21.2"
+chrono = "0.4.38"
 env_logger = "0.10.0"
 futures-util = "0.3.28"
 isahc = {version="1.7.2", features=["json"]}

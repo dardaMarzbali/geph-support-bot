@@ -1,5 +1,6 @@
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, PgConnection};
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 use crate::CONFIG;
 
@@ -38,19 +39,47 @@ This is correct:
 {"action": "Null", "text": "Hi! I just love Geph."}
 "#;
 
+static POOL: Lazy<Pool<Postgres>> = Lazy::new(|| {
+    PgPoolOptions::new()
+        .max_connections(8)
+        .connect_lazy(&CONFIG.actions_config.as_ref().unwrap().binder_db)
+        .unwrap()
+});
+
+pub fn get_pool() -> &'static Pool<Postgres> {
+    &POOL
+}
+
 pub async fn transfer_plus(old_uname: &str, new_uname: &str) -> anyhow::Result<()> {
-    log::debug!("transfer_plus({old_uname}, {new_uname})");
-    let mut conn =
-        PgConnection::connect(&CONFIG.actions_config.as_ref().unwrap().binder_db).await?;
-    log::debug!("connected to binder!");
-    let res = sqlx::query("update subscriptions set id = (select id from users_legacy where username=$1) where id = (select id from users_legacy where username=$2)")
+    let mut tx = get_pool().begin().await?;
+    let (old_uid, old_pwdhash): (i32, String) =
+        sqlx::query_as("SELECT user_id, pwdhash FROM auth_password WHERE username = $1")
+            .bind(old_uname)
+            .fetch_one(&mut *tx)
+            .await?;
+    let (new_uid, new_pwdhash): (i32, String) =
+        sqlx::query_as("SELECT user_id, pwdhash FROM auth_password WHERE username = $1")
+            .bind(new_uname)
+            .fetch_one(&mut *tx)
+            .await?;
+
+    let _ = sqlx::query("DELETE FROM auth_password WHERE username IN ($1, $2)")
+        .bind(old_uname)
+        .bind(new_uname)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO auth_password (user_id, username, pwdhash) VALUES ($1, $2, $3), ($4, $5, $6)",
+    )
+    .bind(new_uid)
+    .bind(old_uname)
+    .bind(old_pwdhash)
+    .bind(old_uid)
     .bind(new_uname)
-    .bind(old_uname).
-    execute(&mut conn).await?;
-    let _ = sqlx::query("update recurring_subs set user_id = (select id from users_legacy where username=$1) where user_id = (select id from users_legacy where username=$2)")
-    .bind(new_uname)
-    .bind(old_uname).
-    execute(&mut conn).await?;
-    log::debug!("{} rows affected!", res.rows_affected());
+    .bind(new_pwdhash)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    log::debug!("transfer_plus({old_uname}, {new_uname}) success!");
     Ok(())
 }

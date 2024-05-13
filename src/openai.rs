@@ -18,6 +18,7 @@ pub async fn call_openai_api(
     let req = json!({
         "model": model,
         "messages": msgs,
+        "response_format": {"type": "json_object"},
         "max_tokens": 500
     });
 
